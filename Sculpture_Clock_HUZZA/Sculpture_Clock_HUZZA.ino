@@ -181,43 +181,29 @@ void loop()  {
     }
   }
   
-  updateTime();
+  now = millis();
+  if ((now-last_time) >= 1000) {
+    last_time=now;
+    epoch=epoch+1;  
+    writeTime();
+    ntp_counter = ntp_counter+1;
+  } 
 
   pot = analogRead(A0);
   if ( (pot > 10) && ((previousPot > (pot+10)) || (previousPot < (pot-10)))) {
     previousPot = pot;
     brightness = pot/45;
     blinkColon = false;
-    int pottime1 = millis();
+//    int pottime1 = millis();
     writeTime();
-    int pottime2 = millis();
-    Serial.print("Writetime in Adjust took ");
-    Serial.print(pottime2-pottime1);
-    Serial.println("ms");
+//    int pottime2 = millis();
+//    Serial.print("Writetime in Adjust took ");
+//    Serial.print(pottime2-pottime1);
+//    Serial.println("ms");
     // 2ms
   }
-  
-  /*
-  now = millis();
-  if ((now-last_time) >= 1000) {
-    last_time=now;
-    epoch=epoch+1;  
-    writeTime(epoch);
-    ntp_counter = ntp_counter+1;
-  } 
-  */
 
 }
-
-void updateTime() {
-  now = millis();
-  if ((now-last_time) >= 1000) {
-    last_time=now;
-    epoch=epoch+1;  
-    writeTime();
-    ntp_counter = ntp_counter+1;
-  } 
-} 
 
 void writeNumber(unsigned int number) {
   // Now print the time value to the display.
