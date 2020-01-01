@@ -1,9 +1,3 @@
-//
-// Use one MAX7219 to control 8-digit seven-segment display
-// the display module: http://www.icshop.com.tw/product_info.php/products_id/20686
-//
-// MAX7219 datasheet: https://datasheets.maximintegrated.com/en/ds/MAX7219-MAX7221.pdf
-//
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
@@ -31,8 +25,6 @@ const char* WPW = "danmotherf4cker";
 ESP8266WiFiMulti WiFiMulti;
 
 const int buttonPin = 2;     // the number of the pushbutton pin
-
-// variables will change:
 int buttonState = 0;         // variable for reading the pushbutton status
 
 BME280I2C bme;    // Default : forced mode, standby time = 1000 ms
@@ -60,11 +52,9 @@ int tzOffset = 1;
 unsigned int pot = 0;
 unsigned int previousPot = 0;
 unsigned int brightness = 15;
+bool blinkColon = false;
 
 unsigned int localPort = 2390;      // local port to listen for UDP packets
-
-
-bool blinkColon = false;
 
 
 void setup()  
@@ -73,7 +63,6 @@ void setup()
   Serial.begin(115200);
   Serial.println();
 
-  // Setup the display.
   clockDisplay.begin(DISPLAY_ADDRESS);
 
   while(!bme.begin()){
@@ -142,43 +131,23 @@ void loop()  {
       Serial.println(cb);
       // We've received a packet, read the data from it
       udp.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
+      unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+      unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+      // combine the four bytes (two words) into a long integer
+      // this is NTP time (seconds since Jan 1 1900):
+      unsigned long secsSince1900 = highWord << 16 | lowWord;
+      Serial.print("Seconds since Jan 1 1900 = " );
+      Serial.println(secsSince1900);
 
-      //the timestamp starts at byte 40 of the received packet and is four bytes,
-      // or two words, long. First, esxtract the two words:
-
-     unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
-     unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
-     // combine the four bytes (two words) into a long integer
-     // this is NTP time (seconds since Jan 1 1900):
-     unsigned long secsSince1900 = highWord << 16 | lowWord;
-     Serial.print("Seconds since Jan 1 1900 = " );
-     Serial.println(secsSince1900);
-
-     // now convert NTP time into everyday time:
-     Serial.print("Unix time = ");
-     // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
-     const unsigned long seventyYears = 2208988800UL;
-     // subtract seventy years:
-     epoch = secsSince1900 - seventyYears;
-     // print Unix time:
-     Serial.println(epoch);
-
-     // print the hour, minute and second:
-     Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
-     Serial.print((epoch  % 86400L) / 3600); // print the hour (86400 equals secs per day)
-     Serial.print(':');
-     if ( ((epoch % 3600) / 60) < 10 ) {
-       // In the first 10 minutes of each hour, we'll want a leading '0'
-       Serial.print('0');
+      // now convert NTP time into everyday time:
+      Serial.print("Unix time = ");
+      // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
+      const unsigned long seventyYears = 2208988800UL;
+      // subtract seventy years:
+      epoch = secsSince1900 - seventyYears;
+      // print Unix time:
+      Serial.println(epoch);
      }
-     Serial.print((epoch  % 3600) / 60); // print the minute (3600 equals secs per minute)
-     Serial.print(':');
-     if ( (epoch % 60) < 10 ) {
-       // In the first 10 seconds of each minute, we'll want a leading '0'
-       Serial.print('0');
-     }
-     Serial.println(epoch % 60); // print the second
-    }
   }
   
   now = millis();
@@ -194,13 +163,7 @@ void loop()  {
     previousPot = pot;
     brightness = pot/45;
     blinkColon = false;
-//    int pottime1 = millis();
     writeTime();
-//    int pottime2 = millis();
-//    Serial.print("Writetime in Adjust took ");
-//    Serial.print(pottime2-pottime1);
-//    Serial.println("ms");
-    // 2ms
   }
 
 }
