@@ -125,7 +125,6 @@ void setup()
 
 void loop()  {
 
-
   if ((ntp_counter == ntp_update) || no_time) {
      //get a random server from the pool
     WiFi.hostByName(ntpServerName, timeServerIP); 
@@ -182,43 +181,43 @@ void loop()  {
     }
   }
   
-  now = millis();
+  updateTime();
+
+  pot = analogRead(A0);
+  if ( (pot > 10) && ((previousPot > (pot+10)) || (previousPot < (pot-10)))) {
+    previousPot = pot;
+    brightness = pot/45;
+    blinkColon = false;
+    int pottime1 = millis();
+    writeTime();
+    int pottime2 = millis();
+    Serial.print("Writetime in Adjust took ");
+    Serial.print(pottime2-pottime1);
+    Serial.println("ms");
+    // 2ms
+  }
   
+  /*
+  now = millis();
   if ((now-last_time) >= 1000) {
     last_time=now;
     epoch=epoch+1;  
     writeTime(epoch);
     ntp_counter = ntp_counter+1;
   } 
-
-  //int pottime1 = millis();
-  pot = analogRead(A0);
-  //int pottime2 = millis();
-  //Serial.print("reading the pot took ");
-  //Serial.print(pottime2-pottime1);
-  //Serial.println("ms");
-  // 0-1ms
-
-  
-  if ( (pot > 10) && ((previousPot > (pot+10)) || (previousPot < (pot-10)))) {
-    int pottime1 = millis();
-//    Serial.println("Pottriggered");
-//    Serial.println(pot);
-//    Serial.println(previousPot);
-    
-    previousPot = pot;
-    brightness = pot/45;
-    blinkColon = false;
-    writeTime(epoch);
-    int pottime2 = millis();
-    Serial.print("Adjusting brightness took ");
-    Serial.print(pottime2-pottime1);
-    Serial.println("ms");
-    // 4-5ms
-  }
+  */
 
 }
 
+void updateTime() {
+  now = millis();
+  if ((now-last_time) >= 1000) {
+    last_time=now;
+    epoch=epoch+1;  
+    writeTime();
+    ntp_counter = ntp_counter+1;
+  } 
+} 
 
 void writeNumber(unsigned int number) {
   // Now print the time value to the display.
@@ -227,16 +226,14 @@ void writeNumber(unsigned int number) {
   clockDisplay.writeDisplay();
 }  
 
-void writeTime(long epoch) {
-
+void writeTime() {
   float temp(NAN), hum(NAN), pres(NAN);
-  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
-  BME280::PresUnit presUnit(BME280::PresUnit_Pa);
-  bme.read(pres, temp, hum, tempUnit, presUnit);
   
   buttonState = digitalRead(buttonPin);
-
   if (buttonState == LOW) {
+    BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+    BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+    bme.read(pres, temp, hum, tempUnit, presUnit);
       if (envdisplay == 0) {
         clockDisplay.print(temp, DEC);
         envdisplay++;
