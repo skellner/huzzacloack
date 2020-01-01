@@ -8,20 +8,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
 #include <WiFiUdp.h>
-
-
-#include <BME280I2C.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include "Adafruit_LEDBackpack.h"
-
-#ifndef _BV
-  #define _BV(bit) (1<<(bit))
-#endif
-
-#define DISPLAY_ADDRESS   0x70
-
-Adafruit_7segment clockDisplay = Adafruit_7segment();
+//#include <ArduinoJson.h>
 
 #include <ESP8266HTTPClient.h>
 
@@ -29,14 +16,6 @@ const char* WSSD = "crackhouse";
 const char* WPW = "danmotherf4cker";
 
 ESP8266WiFiMulti WiFiMulti;
-
-const int buttonPin = 2;     // the number of the pushbutton pin
-
-// variables will change:
-int buttonState = 0;         // variable for reading the pushbutton status
-
-BME280I2C bme;    // Default : forced mode, standby time = 1000 ms
-                  // Oversampling = pressure ×1, temperature ×1, humidity ×1, filter off,
 
 IPAddress timeServerIP;
 const char* ntpServerName = "pool.ntp.org";
@@ -47,6 +26,50 @@ byte packetBuffer[ NTP_PACKET_SIZE]; //buffer to hold incoming and outgoing pack
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP udp;
 
+// the MAX7219 address map (datasheet table 2)
+#define MAX7219_DECODE_REG      (0x09)
+#define MAX7219_INTENSITY_REG   (0x0A)
+#define MAX7219_SCANLIMIT_REG   (0x0B)
+#define MAX7219_SHUTDOWN_REG    (0X0C)
+#define MAX7219_DISPLAYTEST_REG (0x0F)
+#define MAX7219_DIGIT_REG(pos)  ((pos) + 1)
+
+// shutdown mode (datasheet table 3)
+#define MAX7219_OFF             (0x0)
+#define MAX7219_ON              (0x1)
+
+// pin 13 of MAX7219 (CLK)
+const int clock_pin = D2;
+// pin 12 of MAX7219 (LOAD)
+const int data_latch_pin = D1;
+// pin 1 of MAX7219 (DIN)
+const int data_input_pin = D3;
+
+// digit pattern for a 7-segment display. datasheet table 5
+const byte digit_pattern[17] =
+{
+  B01111110,  // 0
+  B00110000,  // 1
+  B01101101,  // 2
+  B01111001,  // 3
+  B00110011,  // 4
+  B01011011,  // 5
+  B01011111,  // 6
+  B01110000,  // 7
+  B01111111,  // 8
+  B01111011,  // 9
+  B01110111,  // A
+  B00011111,  // b
+  B01001110,  // C
+  B00111101,  // d
+  B01001111,  // E
+  B01000111,  // F
+  B00000001   // -
+};
+
+#define DP_FLAG       (B10000000)
+#define NUM_OF_DIGITS (8)
+
 unsigned int counter = 0;
 unsigned int ntp_update = 60000;
 unsigned int ntp_counter = ntp_update;
@@ -54,49 +77,49 @@ unsigned int digit_base = 10;
 unsigned int last_time = 0;
 unsigned int now = 0;
 unsigned int no_time = 1;
-unsigned int envdisplay = 0;
 unsigned long epoch = 0;
 int tzOffset = 1;
-unsigned int pot = 0;
-unsigned int previousPot = 0;
-unsigned int brightness = 15;
 
 unsigned int localPort = 2390;      // local port to listen for UDP packets
 
+// update the register value of MAX7219
+void set_register(byte address, byte value)  
+{
+  digitalWrite(data_latch_pin, LOW);
+  shiftOut(data_input_pin, clock_pin, MSBFIRST, address);
+  shiftOut(data_input_pin, clock_pin, MSBFIRST, value);
+  digitalWrite(data_latch_pin, HIGH);
+}
 
-bool blinkColon = false;
-
+void init_max7219()
+{
+  // disable test mode. datasheet table 10
+  set_register(MAX7219_DISPLAYTEST_REG, MAX7219_OFF);
+  // set medium intensity. datasheet table 7
+  set_register(MAX7219_INTENSITY_REG, 0x8);
+  // turn off display. datasheet table 3
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_OFF);
+  // drive 8 digits. datasheet table 8
+  set_register(MAX7219_SCANLIMIT_REG, 7);
+  // no decode mode for all positions. datasheet table 4
+  set_register(MAX7219_DECODE_REG, B00000000);
+}
 
 void setup()  
 {
+  // init pin states
+  pinMode(clock_pin, OUTPUT);
+  pinMode(data_latch_pin, OUTPUT);    
+  pinMode(data_input_pin, OUTPUT);
+
+  // init MAX2719 states
+  init_max7219();
 
   Serial.begin(115200);
   Serial.println();
+  Serial.println();
 
-  // Setup the display.
-  clockDisplay.begin(DISPLAY_ADDRESS);
 
-  while(!bme.begin()){
-    Serial.println("Could not find BME280 sensor!");
-    delay(1000);
-  }
-  
-  pinMode(buttonPin, INPUT);
-  
-  // bme.chipID(); // Deprecated. See chipModel().
-  switch(bme.chipModel())
-  {
-     case BME280::ChipModel_BME280:
-       Serial.println("Found BME280 sensor! Success.");
-       break;
-     case BME280::ChipModel_BMP280:
-       Serial.println("Found BMP280 sensor! No Humidity available.");
-       break;
-     default:
-       Serial.println("Found UNKNOWN sensor! Error!");
-  }
-
-  
   WiFi.mode(WIFI_STA);
   WiFi.begin(WSSD, WPW);
 
@@ -124,11 +147,12 @@ void setup()
 }
 
 void loop()  {
+  //get a random server from the pool
+  WiFi.hostByName(ntpServerName, timeServerIP); 
 
+  unsigned int number = 0; // numer to be displayed on the 7segment
 
-  if ((ntp_counter == ntp_update) || no_time) {
-     //get a random server from the pool
-    WiFi.hostByName(ntpServerName, timeServerIP); 
+  if ((ntp_counter == ntp_update) || no_time) { 
     ntp_counter = 0;
     no_time = 1;
     sendNTPpacket(timeServerIP); // send an NTP packet to a time server
@@ -137,7 +161,8 @@ void loop()  {
     int cb = udp.parsePacket();
     if (!cb) {
       Serial.println("no packet yet");
-    } else {
+    }
+    else {
       no_time=0;
       Serial.print("packet received, length=");
       Serial.println(cb);
@@ -182,97 +207,110 @@ void loop()  {
     }
   }
   
-  now = millis();
-  
-  if ((now-last_time) >= 1000) {
-    last_time=now;
-    epoch=epoch+1;  
-    writeTime(epoch);
-    ntp_counter = ntp_counter+1;
-  } 
-
-  //int pottime1 = millis();
-  pot = analogRead(A0);
-  //int pottime2 = millis();
-  //Serial.print("reading the pot took ");
-  //Serial.print(pottime2-pottime1);
-  //Serial.println("ms");
-  // 0-1ms
-
-  
-  if ( (pot > 10) && ((previousPot > (pot+10)) || (previousPot < (pot-10)))) {
-    int pottime1 = millis();
-//    Serial.println("Pottriggered");
-//    Serial.println(pot);
-//    Serial.println(previousPot);
-    
-    previousPot = pot;
-    brightness = pot/45;
-    blinkColon = false;
-    writeTime(epoch);
-    int pottime2 = millis();
-    Serial.print("Adjusting brightness took ");
-    Serial.print(pottime2-pottime1);
-    Serial.println("ms");
-    // 4-5ms
+  while ((now-last_time) < 1000) {
+      now = millis();
   }
-
+  last_time=now;
+  epoch=epoch+1;  
+  writeTime(epoch);
+  ntp_counter = ntp_counter+1;
+  
 }
 
 
 void writeNumber(unsigned int number) {
-  // Now print the time value to the display.
-  clockDisplay.print(number, DEC);
-    // Now push out to the display the new values that were set above.
-  clockDisplay.writeDisplay();
-}  
+  
+  int i;
+  unsigned int digit_value;
+  byte byte_data;
+    
+  // turn off display first
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_OFF);
+
+  for (i = 0; i < NUM_OF_DIGITS; i++)
+  {
+    digit_value = number % digit_base;
+    number /= digit_base;
+    byte_data = digit_pattern[digit_value];
+    set_register(MAX7219_DIGIT_REG(i), byte_data);
+  }
+
+  // turn on display
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_ON);
+
+}
+
+
+void writeString(String text) {
+  
+  int i;
+  byte byte_data;
+  unsigned int digit_value;
+  String character;
+    
+  // turn off display first
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_OFF);
+
+  for (i = 0; i < NUM_OF_DIGITS; i++)
+  {
+    if (text.charAt(i) == '-') {
+      byte_data = digit_pattern[16];
+    } else {
+      character = text.charAt(i);
+      digit_value = character.toInt();
+      byte_data = digit_pattern[digit_value];
+    }
+    set_register(MAX7219_DIGIT_REG(NUM_OF_DIGITS-1-i), byte_data);
+  }
+
+  // turn on display
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_ON);
+
+}
+
+String addLeadingZero(int number) {  
+  String result;
+  if (number < 10) {
+    result = "0" + String(number);
+  } else {
+    result = String(number);
+  }
+  return result;
+}
+  
 
 void writeTime(long epoch) {
-
-  float temp(NAN), hum(NAN), pres(NAN);
-  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
-  BME280::PresUnit presUnit(BME280::PresUnit_Pa);
-  bme.read(pres, temp, hum, tempUnit, presUnit);
   
-  buttonState = digitalRead(buttonPin);
+  int i;
+  byte byte_data;
+  unsigned int digit_value;
+  String character;
+  String text;
+  unsigned int hours = (epoch  % 86400L) / 3600;
+  unsigned int minutes =  (epoch  % 3600) / 60;
+  unsigned int seconds = (epoch % 60);
+  
+  hours += tzOffset;  
+  text = addLeadingZero(hours) + "-" + addLeadingZero(minutes) + "-" + addLeadingZero(seconds);
+ 
+  // turn off display first
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_OFF);
 
-  if (buttonState == LOW) {
-      if (envdisplay == 0) {
-        clockDisplay.print(temp, DEC);
-        envdisplay++;
-      } else if (envdisplay == 1) {
-        clockDisplay.print(hum, DEC);
-        envdisplay++;
-      } else if (envdisplay == 2) {
-        clockDisplay.print(pres/100, DEC);
-        envdisplay = 0;
-      }
-  } else {
-    unsigned int hours = (epoch  % 86400L) / 3600;
-    unsigned int minutes =  (epoch  % 3600) / 60;
-    hours += tzOffset;  
-    int displayValue = hours*100 + minutes;
-    clockDisplay.print(displayValue, DEC);
-    
-    //  clockDisplay.setBrightness(1);
-    if (hours == 24) {
-      // Pad hour 0.
-      clockDisplay.writeDigitNum(1, 0);
-      clockDisplay.writeDigitNum(0, 0);
+  for (i = 0; i < NUM_OF_DIGITS; i++)
+  {
+    if (text.charAt(i) == '-') {
+      byte_data = digit_pattern[16];
+    } else {
+      character = text.charAt(i);
+      digit_value = character.toInt();
+      byte_data = digit_pattern[digit_value];
     }
-    // Also pad when the 10's minute is 0 and should be padded.
-    if (hours < 10) {
-      clockDisplay.writeDigitNum(0, 0);
-    }
-    // Also pad when the 10's minute is 0 and should be padded.
-    if (minutes < 10) {
-    clockDisplay.writeDigitNum(2, 0);
-    }
-    blinkColon = !blinkColon;
-    clockDisplay.drawColon(blinkColon);
+    set_register(MAX7219_DIGIT_REG(NUM_OF_DIGITS-1-i), byte_data);
   }
-  clockDisplay.setBrightness(brightness);
-  clockDisplay.writeDisplay();
+
+  // turn on display
+  set_register(MAX7219_SHUTDOWN_REG, MAX7219_ON);
+
 }
 
 
