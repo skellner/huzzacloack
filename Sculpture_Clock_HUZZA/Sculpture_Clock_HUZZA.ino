@@ -165,7 +165,6 @@ void loop()  {
     blinkColon = false;
     writeTime();
   }
-
 }
 
 void writeNumber(unsigned int number) {
